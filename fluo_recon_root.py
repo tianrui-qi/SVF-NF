@@ -22,9 +22,9 @@ def get_args():
     parser = argparse.ArgumentParser()
     # Set general options
     parser.add_argument("--data_path", default='./data', type=str, help="path to data")
-    parser.add_argument("--data_name", default='AVG_roots_xyzScan_z2_128.tif', type=str, help=" simData.tif name of the raw image data")
-    parser.add_argument("--exp_psf_name", default='ExpPSF_605_20240425_shift.mat', type=str, help="experimental PSF name")
-    parser.add_argument("--show_inter_imgs", default=False, type=bool, help="show and save intermediate images")
+    parser.add_argument("--data_name", default='Roots_xyScan_128.tif', type=str, help=" simData.tif name of the raw image data")
+    parser.add_argument("--exp_psf_name", default='ExpPSF_605.mat', type=str, help="experimental PSF name")
+    parser.add_argument("--show_inter_imgs", default=True, type=bool, help="show and save intermediate images")
     parser.add_argument("--display_freq", default=100, type=int, help="display / save intermediate image frequency, every n epochs")
     parser.add_argument("--out_dir", type=str, default="vis_exp")
 
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=args.lr_psf // 6)
     loss_fn = torch.nn.SmoothL1Loss()
 
-    tbar = tqdm(range(num_epochs), desc='Learn PSF')
+    tbar = tqdm(range(num_epochs), desc='Optimization')
     for epoch in tbar:
 
         if epoch < args.init_epochs:
@@ -408,58 +408,24 @@ if __name__ == "__main__":
         g_sample = g_sample * (log_gmax - log_gmin) + log_gmin
         g_sample = torch.exp(g_sample) - 1
 
-    plt.figure(figsize=(6, 4), dpi=300)
-    plt.subplot(1, 2, 1)
-    plt.imshow(torch.log10(torch.mean(g_sample[0], 0) + 1).detach().cpu().numpy(), cmap='gray')
-    plt.axis('image')
-    plt.clim(0, 3)
-    plt.axis('off')
-    plt.title('INR')
-    plt.subplot(1, 2, 2)
-    plt.imshow(torch.log10(torch.mean(g[0], 0) + 1).detach().cpu().numpy(), cmap='gray')
-    plt.axis('image')
-    plt.clim(0, 3) 
-    plt.axis('off')
-    plt.title('Deconvolution')
-    plt.suptitle('INR vs Deconvolution', fontsize=16, y=0.95)
-    plt.savefig(f'{out_dir}/results.png', dpi=300)
-    plt.close()
-
-    
-
-    fac = 1
-    plt.figure(figsize=(6, 4), dpi=300)
-    plt.subplot(2, 1, 1)
-    plt.imshow(g_sample[0,:,350,:].detach().cpu().numpy(), extent=[0,g[0].shape[0],0,g[0].shape[2]], aspect='auto')
-    plt.jet() 
-    plt.clim(0, g[0,:,350,:].max()*fac)
-    plt.axis('off')
-    plt.title('INR')
-    plt.subplot(2, 1, 2)
-    plt.imshow(g[0,:,350,:].detach().cpu().numpy(),  extent=[0,g[0].shape[0],0,g[0].shape[2]], aspect='auto')
-    plt.jet() 
-    plt.clim(0, g[0,:,350,:].max()*fac)
-    plt.axis('off')
-    plt.title('Deconvolution')
-    plt.savefig(f'{out_dir}/xz_results.png', dpi=300)
 
 
-    gPlot_filt_1 = plotz(g.detach().cpu().numpy(), 'Stack Deconvolution')
-    gPlot_filt_2 = plotz(g_sample.detach().cpu().numpy(), 'Stack INR')
+    gPlot_filt_1 = plotz(g.detach().cpu().numpy(), out_dir, 'Stack Deconvolution')
+    gPlot_filt_2 = plotz(g_sample.detach().cpu().numpy(), out_dir, 'Stack INR')
 
-    plt.figure(dpi = 400)
-    plt.imshow(gPlot_filt_1)
-    plt.axis('off')
-    plt.title('Stack Deconvolution')
-    plt.savefig(f'{out_dir}/Stack Deconvolution.png', dpi=400)
-    plt.close()
+    # plt.figure(dpi = 400)
+    # plt.imshow(gPlot_filt_1)
+    # plt.axis('off')
+    # plt.title('Stack Deconvolution')
+    # plt.savefig(f'{out_dir}/Stack Deconvolution.png', dpi=400)
+    # plt.close()
 
-    plt.figure(dpi = 400)
-    plt.imshow(gPlot_filt_2)
-    plt.axis('off')
-    plt.title('Stack INR')
-    plt.savefig(f'{out_dir}/Stack INR.png', dpi=400)
-    plt.close()
+    # plt.figure(dpi = 400)
+    # plt.imshow(gPlot_filt_2)
+    # plt.axis('off')
+    # plt.title('Stack INR')
+    # plt.savefig(f'{out_dir}/Stack INR.png', dpi=400)
+    # plt.close()
 
     # save argparser to txt file
     with open(f'{out_dir}/args.txt', 'w') as f:
