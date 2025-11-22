@@ -1,21 +1,21 @@
-# Function: utility functions
-
-import os
 import torch
-import colorsys
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.ndimage import median_filter
 from scipy.ndimage import gaussian_filter
+
+import os
+import colorsys
+import matplotlib.pyplot as plt
+
 
 def extract_raw(imgTmp, imsize, PSFsize):
     # extract polarized images from raw image
     img = torch.zeros(imgTmp.shape[0]//2, imgTmp.shape[1]//2, 4)
 
-    img[:, :, 0] = torch.from_numpy(imgTmp[::2, ::2]) # 0deg
-    img[:, :, 1] = torch.from_numpy(imgTmp[::2, 1::2]) # 45deg
-    img[:, :, 2] = torch.from_numpy(imgTmp[1::2, 1::2]) # 90deg
-    img[:, :, 3] = torch.from_numpy(imgTmp[1::2, ::2] ) # 135deg
+    img[:, :, 0] = torch.from_numpy(imgTmp[ ::2,  ::2])     # 0deg
+    img[:, :, 1] = torch.from_numpy(imgTmp[ ::2, 1::2])     # 45deg
+    img[:, :, 2] = torch.from_numpy(imgTmp[1::2, 1::2])     # 90deg
+    img[:, :, 3] = torch.from_numpy(imgTmp[1::2,  ::2])     # 135deg
 
     img = img[:imsize-PSFsize,:imsize-PSFsize].to(torch.float32)
     img = img[:imsize-PSFsize,:imsize-PSFsize].permute(2,0,1)
@@ -28,11 +28,14 @@ def extract_raw(imgTmp, imsize, PSFsize):
 
     return img
 
+
 def rgb2hls(rgb):
     return np.array([colorsys.rgb_to_hls(*color[:3]) for color in rgb])
 
+
 def hls2rgb(hls):
     return np.array([colorsys.hls_to_rgb(*color) for color in hls])
+
 
 def cMapHeight_hsv_v2(N, s):
     hsv_map = plt.cm.hsv(np.linspace(0, 1, 900))[:600, :3]
@@ -91,6 +94,7 @@ def plotz(g, out_dir, title="Stack Ground Truth"):
 
     return gPlot_filt
 
+
 def plot_deconvolution(num_z, g, out_dir,tag='Theoretical PSF Deconvolution'):
     plt.figure(figsize=(10, 10), dpi=300)
     for i in range(num_z):
@@ -104,17 +108,30 @@ def plot_deconvolution(num_z, g, out_dir,tag='Theoretical PSF Deconvolution'):
 
     return None
 
+
 def cart2pol(x, y):
     rho = np.sqrt(x**2 + y**2)
     phi = np.arctan2(y, x)
     return(phi,rho)
 
-def Get_PSF(M, rBFP, rBFP_px, px_size, wavelength, NA, block_line, pol_dir, z_min, z_max, z_sep, p_size=256, num_pol=4):
 
-    block_line_px = round(rBFP_px / rBFP / 2 * block_line)  # 3center line half width in pixels
+def Get_PSF(
+    M, rBFP, rBFP_px, px_size, wavelength, NA, block_line, pol_dir, 
+    z_min, z_max, z_sep, p_size=256, num_pol=4
+):
+    # 3center line half width in pixels
+    block_line_px = round(rBFP_px / rBFP / 2 * block_line)  
 
-    u, v = np.meshgrid(np.linspace(-wavelength / (2 * px_size / M), wavelength / (2 * px_size / M), p_size),
-                    np.linspace(-wavelength / (2 * px_size / M), wavelength / (2 * px_size / M), p_size))
+    u, v = np.meshgrid(
+        np.linspace(
+            -wavelength / (2 * px_size / M), 
+            wavelength / (2 * px_size / M), p_size
+        ),
+        np.linspace(
+            -wavelength / (2 * px_size / M),
+            wavelength / (2 * px_size / M), p_size
+        )
+    )
     p, r = np.arctan2(v, u), np.hypot(u, v)
 
     # compute amplitude mask A
@@ -126,12 +143,30 @@ def Get_PSF(M, rBFP, rBFP_px, px_size, wavelength, NA, block_line, pol_dir, z_mi
     pupil_amplitude_s_pol = np.zeros((p_size, p_size, num_pol))
     pupil_amplitude_p_pol = np.zeros((p_size, p_size, num_pol))
     for i in range(num_pol):
-        pupil_amplitude_s_pol[:, :, i] = Atmp * np.rot90(np.block([[np.ones((p_size // 2, p_size // 2)), 0.5 * np.ones((p_size // 2, p_size // 2))],
-                                                                [0.5 * np.ones((p_size // 2, p_size // 2)), np.zeros((p_size // 2, p_size // 2))]]),
-                                                                k=pol_dir[i])
-        pupil_amplitude_p_pol[:, :, i] = Atmp * np.rot90(np.block([[np.zeros((p_size // 2, p_size // 2)), 0.5 * np.ones((p_size // 2, p_size // 2))],
-                                                                [-0.5 * np.ones((p_size // 2, p_size // 2)), np.zeros((p_size // 2, p_size // 2))]]),
-                                                                k=pol_dir[i])
+        pupil_amplitude_s_pol[:, :, i] = Atmp * np.rot90(
+            np.block([
+                [
+                    np.ones((p_size // 2, p_size // 2)), 
+                    0.5 * np.ones((p_size // 2, p_size // 2))
+                ],
+                [
+                    0.5 * np.ones((p_size // 2, p_size // 2)), 
+                    np.zeros((p_size // 2, p_size // 2))
+                ]
+            ]), k=pol_dir[i]
+        )
+        pupil_amplitude_p_pol[:, :, i] = Atmp * np.rot90(
+            np.block([
+                [
+                    np.zeros((p_size // 2, p_size // 2)), 
+                    0.5 * np.ones((p_size // 2, p_size // 2))
+                ],
+                [
+                    -0.5 * np.ones((p_size // 2, p_size // 2)), 
+                    np.zeros((p_size // 2, p_size // 2))
+                ]
+            ]), k=pol_dir[i]
+        )
         
     # defocus phase
     p_defocus = 2 * np.pi / wavelength * np.cos(np.arcsin(r))
@@ -146,7 +181,16 @@ def Get_PSF(M, rBFP, rBFP_px, px_size, wavelength, NA, block_line, pol_dir, z_mi
     for pol in range(num_pol):
         count = 0
         for z in dzs:
-            PSF[:,:,pol,count] = np.abs(np.fft.fftshift(np.fft.fft2(pupil_amplitude_s_pol[:, :, pol] * np.exp(1j * p_defocus * z))))**2 + np.abs(np.fft.fftshift(np.fft.fft2(pupil_amplitude_p_pol[:, :, pol] * np.exp(1j * p_defocus * z))))**2
+            PSF[:,:,pol,count] = (
+                np.abs(np.fft.fftshift(np.fft.fft2(
+                    pupil_amplitude_s_pol[:, :, pol] * 
+                    np.exp(1j * p_defocus * z)
+                )))**2 + 
+                np.abs(np.fft.fftshift(np.fft.fft2(
+                    pupil_amplitude_p_pol[:, :, pol] * 
+                    np.exp(1j * p_defocus * z)
+                )))**2
+            )
             count += 1
 
     PSF = PSF / np.sum(PSF) * num_pol * len(dzs)
@@ -154,4 +198,10 @@ def Get_PSF(M, rBFP, rBFP_px, px_size, wavelength, NA, block_line, pol_dir, z_mi
     # rotate PSF for 180 deg at each plane (axis=2) [N N num_pol 31]
     PSFR = np.rot90(PSF, k=2, axes=(0,1))
 
-    return torch.tensor(PSF.copy()).to(torch.float32), torch.tensor(PSFR.copy()).to(torch.float32), pupil_amplitude_s_pol, pupil_amplitude_p_pol, p_defocus
+    return (
+        torch.tensor(PSF.copy()).to(torch.float32), 
+        torch.tensor(PSFR.copy()).to(torch.float32), 
+        pupil_amplitude_s_pol, 
+        pupil_amplitude_p_pol, 
+        p_defocus
+    )

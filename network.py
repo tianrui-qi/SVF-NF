@@ -5,7 +5,7 @@ import torch.nn as nn
 
 class DeconNet(nn.Module):
     def __init__(self, img, PSF, PSFR, rPSF, r, num_z):
-        super(DeconNet, self).__init__()
+        super().__init__()
         self.rPSF = rPSF
         self.r = r
         self.num_z = num_z
