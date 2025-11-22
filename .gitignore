@@ -1,2 +1,13 @@
-/vis_exp
-# /data
+/data/
+/log/
+/ckpt/
+
+# temp folder and files
+**/temp/
+**/temp.*
+
+# compile file
+**/.asv
+**/__pycache__/
+**/.idea/
+**/.DS_Store

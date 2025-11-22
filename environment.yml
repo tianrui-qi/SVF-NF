@@ -1,0 +1,12 @@
+name: SVF-NF
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - pytorch=2.8
+  - numpy=2.3
+  - scipy=1.16
+  - scikit-image=0.25
+  - jupyter=1.1
+  - matplotlib=3.10
+  - tqdm=4.67

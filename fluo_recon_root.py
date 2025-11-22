@@ -21,21 +21,53 @@ torch.set_default_tensor_type('torch.cuda.FloatTensor') # torch version
 def get_args():
     parser = argparse.ArgumentParser()
     # Set general options
-    parser.add_argument("--data_path", default='./data', type=str, help="path to data")
-    parser.add_argument("--data_name", default='Roots_xyScan_128.tif', type=str, help=" simData.tif name of the raw image data")
-    parser.add_argument("--exp_psf_name", default='ExpPSF_605.mat', type=str, help="experimental PSF name")
-    parser.add_argument("--show_inter_imgs", default=True, type=bool, help="show and save intermediate images")
-    parser.add_argument("--display_freq", default=100, type=int, help="display / save intermediate image frequency, every n epochs")
-    parser.add_argument("--out_dir", type=str, default="vis_exp")
+    parser.add_argument(
+        "--data_path", default='./data', type=str, 
+        help="path to data"
+    )
+    parser.add_argument(
+        "--data_name", default='Roots_xyScan_128.tif', type=str, 
+        help=" simData.tif name of the raw image data"
+    )
+    parser.add_argument(
+        "--exp_psf_name", default='ExpPSF_605.mat', type=str, 
+        help="experimental PSF name"
+    )
+    parser.add_argument(
+        "--show_inter_imgs", default=True, type=bool, 
+        help="show and save intermediate images"
+    )
+    parser.add_argument(
+        "--display_freq", default=100, type=int, 
+        help="display / save intermediate image frequency, every n epochs"
+    )
+    parser.add_argument(
+        "--out_dir", type=str, default="vis_exp"
+    )
 
     # Iterative deconvolution options
-    parser.add_argument("--num_iters", default=100, type=int, help="number of iterations for deconvolution")
-    parser.add_argument("--use_amp", default=True, type=bool, help="use automatic mixed precision for deconvolution")
-    parser.add_argument("--model_opt", default="jit", type=str,help="options: [jit | compile | None]")
+    parser.add_argument(
+        "--num_iters", default=100, type=int, 
+        help="number of iterations for deconvolution"
+    )
+    parser.add_argument(
+        "--use_amp", default=True, type=bool, 
+        help="use automatic mixed precision for deconvolution"
+    )
+    parser.add_argument(
+        "--model_opt", default="jit", type=str,
+        help="options: [jit | compile | None]"
+    )
 
     # Learn PSF options
-    parser.add_argument("--if_log", default=False, type=bool, help="logarithm of raw image")
-    parser.add_argument("--if_lr_psf", default=True, help="if learn PSF")
+    parser.add_argument(
+        "--if_log", default=False, type=bool, 
+        help="logarithm of raw image"
+    )
+    parser.add_argument(
+        "--if_lr_psf", default=True, 
+        help="if learn PSF"
+    )
     parser.add_argument("--learn_psf_epochs", default=100, type=int, help="number of epochs for learn psf")
     parser.add_argument("--init_epochs", default=100, type=int, help="number of epochs for initialization")
     parser.add_argument("--lr_psf", default=8e-3, type=float, help="learning rate for learn psf")
@@ -94,12 +126,18 @@ if __name__ == "__main__":
     imsize = int(args.patch_size + args.p_size)
     M = args.f_tube / args.f_obj  # magnification
     rBFP = args.NA * args.f_obj  # pupil radius
-    rBFP_px = round(args.p_size * args.NA * args.px_size / args.wavelength / M)  # pupil diameter in pixels
+    rBFP_px = round(    # pupil diameter in pixels
+        args.p_size * args.NA * args.px_size / args.wavelength / M
+    )
     pad_pix = int(np.floor((args.p_size - 2*rBFP_px) / 2))
     pupil_size = int(rBFP_px * 2)
 
     # s and p stands for s and p polarizations
-    PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = Get_PSF(M, rBFP, rBFP_px, args.px_size, args.wavelength, args.NA, args.block_line, args.pol_dir, args.z_min, args.z_max, args.z_sep, args.p_size)
+    PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = Get_PSF(
+        M, rBFP, rBFP_px, args.px_size, args.wavelength, args.NA, 
+        args.block_line, args.pol_dir, 
+        args.z_min, args.z_max, args.z_sep, args.p_size
+    )
 
 
     PSF = sio.loadmat(f'{args.data_path}/{args.exp_psf_name}')['PSF']
@@ -149,8 +187,14 @@ if __name__ == "__main__":
     g_exper = g
     del g, model, model_fn, PSF, PSFR
 
-    PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = Get_PSF(M, rBFP, rBFP_px, args.px_size, args.wavelength, args.NA, args.block_line, args.pol_dir, args.z_min, args.z_max, args.z_sep, args.p_size)
-    dzs = 1e-3 * torch.arange(args.z_min, args.z_max + args.z_sep, args.z_sep).to(torch.float32)
+    PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = Get_PSF(
+        M, rBFP, rBFP_px, args.px_size, args.wavelength, args.NA, 
+        args.block_line, args.pol_dir, 
+        args.z_min, args.z_max, args.z_sep, args.p_size
+    )
+    dzs = 1e-3 * torch.arange(
+        args.z_min, args.z_max + args.z_sep, args.z_sep
+    ).to(torch.float32)
     num_z = len(dzs)
     defocus_temp = defocus
     defocus = torch.tensor(defocus).to(torch.float32)[None, None].repeat(1, num_z, 1, 1)
@@ -402,7 +446,10 @@ if __name__ == "__main__":
 
     ext = 1
     sample_slice = int(num_z * ext)
-    dz_sample = 1e-3 * torch.arange(args.z_min * ext, args.z_max * ext, ext * (args.z_max - args.z_min) / sample_slice).to(torch.float32)
+    dz_sample = 1e-3 * torch.arange(
+        args.z_min * ext, args.z_max * ext, 
+        ext * (args.z_max - args.z_min) / sample_slice
+    ).to(torch.float32)
     g_sample = model_fn(dz_sample)
     if args.if_log:
         g_sample = g_sample * (log_gmax - log_gmin) + log_gmin
