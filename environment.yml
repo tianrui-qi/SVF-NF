@@ -1,4 +1,4 @@
-name: SVF-NF
+name: svf-nf
 channels:
   - conda-forge
   - defaults
