@@ -4,91 +4,52 @@
 import torch
 import numpy as np
 import scipy.io
-import scipy.ndimage
-import skimage.io
 
 import os
 import tqdm
+import warnings
 import tifffile 
+import dataclasses
 import matplotlib.pyplot as plt
-from typing import Final
 
-from network import DeconNet, FullModel
-from util import Get_PSF, plotz, plot_deconvolution
+from network import FullModel
+from util import getPSFsim, plotz, plot_deconvolution
 import src
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
+torch.set_float32_matmul_precision("medium")
+# disable MPS performance warnings
+warnings.filterwarnings(
+    "ignore",
+    message=".*MPS: The constant padding of more than 3 dimensions.*",
+)
 
+# device
 if torch.backends.mps.is_available(): device = torch.device("mps")
 elif torch.cuda.is_available(): device = torch.device("cuda")
 else: device = torch.device("cpu")
 
-def getPSFexp(psf_load_path: str) -> torch.Tensor:
-    # NOTE: assume PSF store in 'PSF' of .mat file in order (H, W, C, D)
-    # psf
-    PSF = torch.tensor(     # (C, D, H=K, W=K)
-        scipy.io.loadmat(psf_load_path)['PSF']
-    ).float().permute(2, 3, 0, 1)
-    # global energy normalization
-    PSF = PSF / PSF.sum() * PSF.size(0) * PSF.size(1)
-    # return
-    return PSF  # (C, D, H=K, W=K)
 
-def getI(data_load_path: str, N: int) -> torch.Tensor:
-    # load measurement
-    # note that this image's dimension may not exactly be (2N, 2N)
-    I = torch.tensor(       # (H=2048, W=2448)
-        skimage.io.imread(data_load_path)
-    ).float()
-    # channel separation
-    I = torch.stack([       # (C=4, H//2, W//2)
-        I[ ::2,  ::2],      # [0, 0]: 0°
-        I[ ::2, 1::2],      # [0, 1]: 45°
-        I[1::2, 1::2],      # [1, 1]: 90°
-        I[1::2,  ::2],      # [1, 0]: 135°
-    ], dim=0)
-    # crop
-    I = I[:, :N, :N]        # (C=4, H=N, W=N)
-    I = I.unsqueeze(1)      # (C=4, D=1, H=N, W=N)
-    # denoise
-    # apply 5×5 median filter over spatial dims (H, W) to
-    # suppress local spike noise to prevent RL deconvolution and neural field 
-    # fitting from amplifying it, while preserving edges and fine structures
-    I = torch.tensor(
-        scipy.ndimage.median_filter(I.numpy(), size=(1, 1, 5, 5))
-    ).float()
-    # return
-    return I    # (C=4, D=1, H=N, W=N)
+# %% # setup
+""" setup """
 
-
-# %% # config
-""" config """
-
+# config
 config = src.config.ConfigRoot()
-os.makedirs(config.data_save_fold, exist_ok=True)
+# load
+I = src.data.getI(config.data_load_path, config.N)  # (C=4,  1, H=N, W=N)
+PSFexp  = src.data.getPSFexp(config.psf_load_path)  # (C=4, 41, H=K, W=K)
 
 
-# %% # load
+# %% decon with experimental PSF
 
-PSF  = getPSFexp(config.psf_load_path)      # (C=4, D=41, H= 256, W= 256)
-PSFR = torch.flip(PSF, dims=[-2, -1])       # (C=4, D=41, H= 256, W= 256)
-I = getI(config.data_load_path, config.N)   # (C=4, D= 1, H=1024, W=1024)
-
-
-
-# %% Deconvolution with experimental PSF (first stage)
-
-imsize = int(config.N + config.K)
-num_z = PSF.shape[1]
-PSFsize = PSF.shape[2]
-
-Oexp = (I[0, 0] / num_z).repeat(num_z, 1, 1)[None].to(torch.float32)
-model = DeconNet(I, PSF, PSFR, config.K // 2, imsize, num_z)
-for _ in tqdm.tqdm(range(config.num_iters)):
-    Oexp = model(Oexp)
-
+# deconvolution
+model = src.model.DeconPoisson(I.to(device), PSFexp.to(device))
+for _ in tqdm.tqdm(range(config.epoch_decon)): model()
+Oexp = model.O.detach().cpu()
+del model   # free memory
 # save
+os.makedirs(config.data_save_fold, exist_ok=True)
 tifffile.imwrite(
     os.path.join(config.data_save_fold, "Oexp.tif"),
     Oexp.detach().cpu().numpy().astype(np.float32)[:, :, None, ...],
@@ -99,37 +60,11 @@ tifffile.imwrite(
 
 # %% Recompute analytic PSF for retrieved phase
 
-# convert aberration to PSF
-def abe_to_psf(aberration, num_pol, pupil_ampli_s, pupil_ampli_p, defocus):
-    pupil_phase = (aberration + defocus).repeat(num_pol, 1, 1, 1)
-    pupil_s = pupil_ampli_s * torch.exp(1j * pupil_phase) 
-    pupil_p = pupil_ampli_p * torch.exp(1j * pupil_phase) 
-    pupil_ifft = torch.flip(torch.fft.ifftshift(torch.fft.ifftn(
-        pupil_s, dim=(-2, -1)
-    ), dim=(-2, -1)), dims=[-2, -1])
-    psf_s = torch.abs(pupil_ifft) ** 2
-    pupil_ifft = torch.flip(torch.fft.ifftshift(torch.fft.ifftn(
-        pupil_p, dim=(-2, -1)
-    ), dim=(-2, -1)), dims=[-2, -1])
-    psf_p = torch.abs(pupil_ifft) ** 2
-
-    psf = psf_s + psf_p
-    return psf
-
-
-M = config.f_tube / config.f_obj  # magnification
-rBFP: Final = config.NA * config.f_obj  # pupil radius
-rBFP_px: Final = round(    # pupil diameter in pixels
-    config.K * config.NA * config.px_size / config.wavelength / M
+PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = getPSFsim(
+    **dataclasses.asdict(config)
 )
-pad_pix = int(np.floor((config.K - 2*rBFP_px) / 2))
-pupil_size = int(rBFP_px * 2)
 
-PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = Get_PSF(
-    M, rBFP, rBFP_px, config.px_size, config.wavelength, config.NA, 
-    config.block_line, config.pol_dir, 
-    config.z_min, config.z_max, config.z_sep, config.K
-)
+# %%
 dzs = 1e-3 * torch.arange(
     config.z_min, config.z_max + config.z_sep, config.z_sep
 ).to(torch.float32)
@@ -147,7 +82,7 @@ defocus = defocus.to(device)
 PSF = PSF.permute(2, 3, 0, 1)
 PSFR = PSFR.permute(2, 3, 0, 1) # this is PSF rotated by 180 degrees
 num_z = PSF.shape[1]
-PSFsize = PSF.shape[2]
+
 
  # %% Deconvolution with retrieved phase PSF (second stage)
 abe = scipy.io.loadmat(
@@ -172,27 +107,39 @@ pupil_ampli_p = (
 )
 pupil_ampli_p = pupil_ampli_p.to(device)
 
+# convert aberration to PSF
+def abe_to_psf(aberration, num_pol, pupil_ampli_s, pupil_ampli_p, defocus):
+    pupil_phase = (aberration + defocus).repeat(num_pol, 1, 1, 1)
+    pupil_s = pupil_ampli_s * torch.exp(1j * pupil_phase) 
+    pupil_p = pupil_ampli_p * torch.exp(1j * pupil_phase) 
+    pupil_ifft = torch.flip(torch.fft.ifftshift(torch.fft.ifftn(
+        pupil_s, dim=(-2, -1)
+    ), dim=(-2, -1)), dims=[-2, -1])
+    psf_s = torch.abs(pupil_ifft) ** 2
+    pupil_ifft = torch.flip(torch.fft.ifftshift(torch.fft.ifftn(
+        pupil_p, dim=(-2, -1)
+    ), dim=(-2, -1)), dims=[-2, -1])
+    psf_p = torch.abs(pupil_ifft) ** 2
+
+    psf = psf_s + psf_p
+    return psf
+
 #  to tensor
 abe = torch.tensor(abe).to(torch.float32).to(device) 
 PSF = abe_to_psf(
     abe, config.C, pupil_ampli_s, pupil_ampli_p, defocus
 )
 PSF = PSF / PSF.sum() * config.C * len(dzs)
-# rotate psf for 180 degree
-PSFR = (torch.flip(PSF, dims=[-2, -1]))
 
-g = (I[0, 0] / num_z).repeat(num_z, 1, 1)[None].to(torch.float32)
-model = DeconNet(I, PSF, PSFR, PSFsize // 2, imsize, num_z).to(device)
-model_fn = model
-model_fn = torch.compile(model, backend="inductor")
-
-for iter in tqdm.tqdm(range(config.num_iters)):
-    g = model_fn(g)
+model = src.model.DeconPoisson(I.to(device), PSF.to(device))
+for _ in tqdm.tqdm(range(config.epoch_decon)): model()
+Oret = model.O.detach().cpu()
 
 # show the deconvolved results
-plot_deconvolution(num_z, g, config.data_save_fold, tag='Retrieved Phase Deconvolution')
-g_retri = g
-del g, model, model_fn, PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus
+plot_deconvolution(
+    num_z, Oret, config.data_save_fold, tag='Retrieved Phase Deconvolution'
+)
+g_retri = Oret.clone()
 
 
 # %% Neural representations: merge experimental and retrieved stacks

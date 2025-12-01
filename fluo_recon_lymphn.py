@@ -12,7 +12,7 @@ import scipy.io as sio
 from pytorch_msssim import SSIM
 
 from network import DeconNet, FullModel
-from util import extract_raw, Get_PSF, plotz, plot_deconvolution
+from util import extract_raw, getPSFsim, plotz, plot_deconvolution
 
 torch.manual_seed(0)
 torch.backends.cudnn.deterministic = True
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     pupil_size = int(rBFP_px * 2)
 
     # s and p stands for s and p polarizations
-    PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = Get_PSF(M, rBFP, rBFP_px, args.px_size, args.wavelength, args.NA, args.block_line, args.pol_dir, args.z_min, args.z_max, args.z_sep, args.p_size)
+    PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = getPSFsim(M, rBFP, rBFP_px, args.px_size, args.wavelength, args.NA, args.block_line, args.pol_dir, args.z_min, args.z_max, args.z_sep, args.p_size)
 
     PSF = PSF.permute(2, 3, 0, 1)
     PSFR = PSFR.permute(2, 3, 0, 1) 

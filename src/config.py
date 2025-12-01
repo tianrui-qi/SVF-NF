@@ -8,13 +8,21 @@ class Config():
     data_save_fold: str = ""
 
     C: int = 4      # number of polarizations
-    N: int = 1024   # image H and W
+    N: int = 1024   # image H and W after channel seperation
     K: int = 256    # PSF H and W
 
-    # HACK
+    epoch_decon: int = 100  # num of iterations for RL deconvolution
 
-    # Iterative deconvolution options
-    num_iters: int = 100    # number of iterations for deconvolution
+    f_obj: float = 80e-3            # objective lens focal length
+    f_tube: float = 150e-3          # tube lens focal length
+    px_size: float = 6.9e-6         # camera pixel size
+    wavelength: float = 605e-9      # emission wavelength
+    NA: float = 0.0563              # numerical aperture
+    block_line: float = 0.6e-3      # 3D printed pupil block center line width
+    # polarizer direction, check this to match to the alignment of polarizer
+    pol_dir: tuple[int, ...] = (1, 2, 3, 0) 
+
+    # HACK
 
     # show and save intermediate images
     show_inter_imgs: bool = True
@@ -40,16 +48,6 @@ class Config():
     num_feats: int = 32             # number of features in the network
     l1_g: float = 0.0               # L1 sparsity weight for g_est
     l1_z: float = 0.0               # L1 sparsity weight for z_data
-
-    # Experimental parameters
-    wavelength: float = 605e-9      # emission wavelength
-    px_size: float = 6.9e-6         # camera pixel size
-    NA: float = 0.0563              # numerical aperture
-    f_obj: float = 80e-3            # objective lens focal length
-    f_tube: float = 150e-3          # tube lens focal length
-    block_line: float = 0.6e-3      # 3D printed pupil block center line width
-    # polarizer direction, check this to match to the alignment of polarizer
-    pol_dir: tuple[int, ...] = (1, 2, 3, 0) 
 
 
 class ConfigRoot(Config):

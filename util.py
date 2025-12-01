@@ -1,32 +1,10 @@
 import torch
 import numpy as np
-from scipy.ndimage import median_filter
 from scipy.ndimage import gaussian_filter
 
 import os
 import colorsys
 import matplotlib.pyplot as plt
-
-
-def extract_raw(imgTmp, imsize, PSFsize):
-    # extract polarized images from raw image
-    img = torch.zeros(imgTmp.shape[0]//2, imgTmp.shape[1]//2, 4)
-
-    img[:, :, 0] = torch.from_numpy(imgTmp[ ::2,  ::2])     # 0deg
-    img[:, :, 1] = torch.from_numpy(imgTmp[ ::2, 1::2])     # 45deg
-    img[:, :, 2] = torch.from_numpy(imgTmp[1::2, 1::2])     # 90deg
-    img[:, :, 3] = torch.from_numpy(imgTmp[1::2,  ::2])     # 135deg
-
-    img = img[:imsize-PSFsize,:imsize-PSFsize].to(torch.float32)
-    img = img[:imsize-PSFsize,:imsize-PSFsize].permute(2,0,1)
-    img = img.unsqueeze(1)
-
-    imgTmp = img.cpu().numpy()
-    # Noise reduction
-    imgTmp = median_filter(imgTmp, size=(1, 1, 5, 5)) 
-    img = torch.tensor(imgTmp).to(torch.float32)
-
-    return img
 
 
 def rgb2hls(rgb):
@@ -115,55 +93,63 @@ def cart2pol(x, y):
     return(phi,rho)
 
 
-def Get_PSF(
-    M, rBFP, rBFP_px, px_size, wavelength, NA, block_line, pol_dir, 
-    z_min, z_max, z_sep, p_size=256, num_pol=4
+def getPSFsim(
+    f_obj: float, f_tube: float, px_size: float, wavelength: float, NA: float,
+    block_line: float, pol_dir: tuple[int, ...], 
+    z_min: float, z_max: float, z_sep: float, K: int, C: int,
+    **kwargs
 ):
+    M = f_tube / f_obj  # magnification
+    rBFP = NA * f_obj   # pupil radius
+    rBFP_px = round(    # pupil diameter in pixels
+        K * NA * px_size / wavelength / M
+    )
+
     # 3center line half width in pixels
     block_line_px = round(rBFP_px / rBFP / 2 * block_line)  
 
     u, v = np.meshgrid(
         np.linspace(
             -wavelength / (2 * px_size / M), 
-            wavelength / (2 * px_size / M), p_size
+            wavelength / (2 * px_size / M), K
         ),
         np.linspace(
             -wavelength / (2 * px_size / M),
-            wavelength / (2 * px_size / M), p_size
+            wavelength / (2 * px_size / M), K
         )
     )
     p, r = np.arctan2(v, u), np.hypot(u, v)
 
     # compute amplitude mask A
-    Atmp = np.ones((p_size, p_size))
+    Atmp = np.ones((K, K))
     Atmp[r >= NA] = 0
-    Atmp[p_size // 2 - block_line_px:p_size // 2 + block_line_px, :] = 0
-    Atmp[:, p_size // 2 - block_line_px:p_size // 2 + block_line_px] = 0
+    Atmp[K // 2 - block_line_px:K // 2 + block_line_px, :] = 0
+    Atmp[:, K // 2 - block_line_px:K // 2 + block_line_px] = 0
 
-    pupil_amplitude_s_pol = np.zeros((p_size, p_size, num_pol))
-    pupil_amplitude_p_pol = np.zeros((p_size, p_size, num_pol))
-    for i in range(num_pol):
+    pupil_amplitude_s_pol = np.zeros((K, K, C))
+    pupil_amplitude_p_pol = np.zeros((K, K, C))
+    for i in range(C):
         pupil_amplitude_s_pol[:, :, i] = Atmp * np.rot90(
             np.block([
                 [
-                    np.ones((p_size // 2, p_size // 2)), 
-                    0.5 * np.ones((p_size // 2, p_size // 2))
+                    np.ones((K // 2, K // 2)), 
+                    0.5 * np.ones((K // 2, K // 2))
                 ],
                 [
-                    0.5 * np.ones((p_size // 2, p_size // 2)), 
-                    np.zeros((p_size // 2, p_size // 2))
+                    0.5 * np.ones((K // 2, K // 2)), 
+                    np.zeros((K // 2, K // 2))
                 ]
             ]), k=pol_dir[i]
         )
         pupil_amplitude_p_pol[:, :, i] = Atmp * np.rot90(
             np.block([
                 [
-                    np.zeros((p_size // 2, p_size // 2)), 
-                    0.5 * np.ones((p_size // 2, p_size // 2))
+                    np.zeros((K // 2, K // 2)), 
+                    0.5 * np.ones((K // 2, K // 2))
                 ],
                 [
-                    -0.5 * np.ones((p_size // 2, p_size // 2)), 
-                    np.zeros((p_size // 2, p_size // 2))
+                    -0.5 * np.ones((K // 2, K // 2)), 
+                    np.zeros((K // 2, K // 2))
                 ]
             ]), k=pol_dir[i]
         )
@@ -176,9 +162,9 @@ def Get_PSF(
     # for z in ... A[:,:,0] -- first channel, etc.
     dzs = 1e-3 * np.arange(z_min, z_max + z_sep, z_sep)
     # print(len(dzs))
-    PSF = np.zeros((p_size, p_size, num_pol, len(dzs)))
+    PSF = np.zeros((K, K, C, len(dzs)))
     
-    for pol in range(num_pol):
+    for pol in range(C):
         count = 0
         for z in dzs:
             PSF[:,:,pol,count] = (
@@ -193,7 +179,7 @@ def Get_PSF(
             )
             count += 1
 
-    PSF = PSF / np.sum(PSF) * num_pol * len(dzs)
+    PSF = PSF / np.sum(PSF) * C * len(dzs)
 
     # rotate PSF for 180 deg at each plane (axis=2) [N N num_pol 31]
     PSFR = np.rot90(PSF, k=2, axes=(0,1))
