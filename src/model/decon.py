@@ -15,29 +15,27 @@ class DeconPoisson(torch.nn.Module):
         self.P = self.K // 2            # padding on each side of I when fft
         self.S = self.N + 2 * self.P    # dim after padding when fft
 
+        self.I = I                          # (C, 1, H=N, W=N)
+        self.PSF = PSF                      # (C, D, H=K, W=K)
+        self.PSFR = torch.flip(             # (C, D, H=K, W=K)
+            PSF, dims=[-2, -1]
+        )
         # initialize reconstructed volume O
-        # NOTE: In haowen's original implementation, he use first channel
-        #       as initialization of O. Here we use mean of all channels.
+        # NOTE: In Haowen's implementation, he use first channel as 
+        #       initialization of O. Here we use mean of all channels.
         self.O = (                          # (1, D, H=N, W=N)
             I.mean(dim=0, keepdim=True) / self.D
         ).repeat(1, self.D, 1, 1)
 
-        # we implement convolution by multiplication in Fourier space
-        # precompute FFTs of I, PSF, PSFR since they are constant during
-        # the RL deconvolution iterations
-        I_fft = torch.fft.fftn(             # (C, 1, H=S, W=S)
-            I, dim=(-2, -1), s=(self.S, self.S)
-        )
-        self.PSF_fft = torch.fft.fftn(      # (C, D, H=S, W=S)
-            PSF, dim=(-2, -1), s=(self.S, self.S)
-        )
-        self.PSFR_fft = torch.fft.fftn(     # (C, D, H=S, W=S)
-            torch.flip(PSF, dims=[-2, -1]), dim=(-2, -1), s=(self.S, self.S)
-        )
+        # implement convolution by multiplication in Fourier space
+        # NOTE: In Haowen's implementation, he precompute FFT of I, PSF, PSFR.
+        #       However, that would require lots of memory, expecially for 
+        #       PSF and PSFR. Thus, in our implementation, we will compute FFT 
+        #       on the fly.
 
         # precompute numerator of RL deconvolution update scheme
         self.numer = torch.fft.ifftn(       # (C, D, H=S, W=S)
-            I_fft * self.PSFR_fft, dim=(-2, -1)
+            self.fft(self.I) * self.fft(self.PSFR), dim=(-2, -1)
         )
         self.numer = torch.sum(             # (1, D, H=S, W=S)
             self.numer, dim=0, keepdim=True
@@ -50,7 +48,7 @@ class DeconPoisson(torch.nn.Module):
 
     def forward(self):
         # compute denominator of RL deconvolution update scheme
-        # NOTE: In Haowen's original implementation
+        # NOTE: In Haowen's implementation
         #       (https://github.com/hwzhou2020/SVF/blob/main/network.py#L24), 
         #       he mentions there is a weird shift when computing denominator 
         #       and solves by removing padding by 
@@ -61,11 +59,8 @@ class DeconPoisson(torch.nn.Module):
         #       convolution. We fix this issue by remove padding after first 
         #       convolution and re-pad in second. 
         # first convolve
-        O_fft = torch.fft.fftn(             # (1, D, H=S, W=S)
-            self.O, dim=(-2,-1), s=(self.S,self.S)
-        )
         denom = torch.fft.ifftn(            # (C, D, H=S, W=S)
-            O_fft * self.PSF_fft, dim=(-2, -1)
+            self.fft(self.O) * self.fft(self.PSF), dim=(-2, -1)
         )
         denom = torch.sum(                  # (C, 1, H=S, W=S)
             denom, dim=1, keepdim=True
@@ -74,11 +69,8 @@ class DeconPoisson(torch.nn.Module):
             :, :, self.P:-self.P, self.P:-self.P
         ]
         # second convolve
-        denom = torch.fft.fftn(             # (C, 1, H=S, W=S)
-            denom, dim=(-2, -1), s=(self.S, self.S)
-        ) 
         denom = torch.fft.ifftn(            # (C, D, H=S, W=S)
-            denom * self.PSFR_fft, dim=(-2, -1)
+            self.fft(denom) * self.fft(self.PSFR), dim=(-2, -1)
         )
         denom = torch.sum(                  # (1, D, H=S, W=S)
             denom, dim=0, keepdim=True
@@ -92,3 +84,6 @@ class DeconPoisson(torch.nn.Module):
         self.O = self.O * (self.numer / denom)
 
         return self.O
+
+    def fft(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.fft.fftn(x, dim=(-2, -1), s=(self.S, self.S))

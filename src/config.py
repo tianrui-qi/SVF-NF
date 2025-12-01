@@ -3,24 +3,31 @@ import dataclasses
 
 @dataclasses.dataclass(slots=True)
 class Config():
+    # path
     psf_load_path: str = "data/ExpPSF_605.mat"
     data_load_path: str = ""
     data_save_fold: str = ""
 
+    # dimension
     C: int = 4      # number of polarizations
     N: int = 1024   # image H and W after channel seperation
     K: int = 256    # PSF H and W
+    z_max: float =  4.0     # maximum z-value in mm
+    z_min: float = -4.0     # minimum z-value in mm
+    z_sep: float = 0.1      # z separation in mm
+    z_dim: int = 8
 
+    # system 
+    f_obj: float = 80e-3        # objective lens focal length
+    f_tube: float = 150e-3      # tube lens focal length
+    px_size: float = 6.9e-6     # camera pixel size
+    wavelength: float = 605e-9  # emission wavelength
+    NA: float = 0.0563          # numerical aperture
+    block_line: float = 0.6e-3  # 3D printed pupil block center line width
+    pol_dir: tuple[int, ...] = (1, 2, 3, 0)     # polarizer direction
+
+    # run
     epoch_decon: int = 100  # num of iterations for RL deconvolution
-
-    f_obj: float = 80e-3            # objective lens focal length
-    f_tube: float = 150e-3          # tube lens focal length
-    px_size: float = 6.9e-6         # camera pixel size
-    wavelength: float = 605e-9      # emission wavelength
-    NA: float = 0.0563              # numerical aperture
-    block_line: float = 0.6e-3      # 3D printed pupil block center line width
-    # polarizer direction, check this to match to the alignment of polarizer
-    pol_dir: tuple[int, ...] = (1, 2, 3, 0) 
 
     # HACK
 
@@ -37,12 +44,6 @@ class Config():
     lr_psf: float = 8e-3            # learning rate for learn psf
     use_layernorm: bool = False     # use layernorm in PSF model
 
-    # Data parameters 
-    z_max: float = 4.0              # maximum z-value in mm
-    z_min: float = -4.0             # minimum z-value in mm
-    z_sep: float = 0.1              # z separation in mm
-    z_dim: int = 8
-    
     # Learn PSF parameters
     num_coeff: int = 100            # number of Zernike coefficients
     num_feats: int = 32             # number of features in the network

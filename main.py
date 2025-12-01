@@ -13,17 +13,14 @@ import dataclasses
 import matplotlib.pyplot as plt
 
 from network import FullModel
-from util import getPSFsim, plotz, plot_deconvolution
+from util import plotz
 import src
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 torch.set_float32_matmul_precision("medium")
 # disable MPS performance warnings
-warnings.filterwarnings(
-    "ignore",
-    message=".*MPS: The constant padding of more than 3 dimensions.*",
-)
+warnings.filterwarnings("ignore", message=".*MPS:*")
 
 # device
 if torch.backends.mps.is_available(): device = torch.device("mps")
@@ -36,76 +33,62 @@ else: device = torch.device("cpu")
 
 # config
 config = src.config.ConfigRoot()
-# load
+# measurement
 I = src.data.getI(config.data_load_path, config.N)  # (C=4,  1, H=N, W=N)
+
+
+# %% # deconvolution with experimental psf
+""" deconvolution with experimental psf """
+
+# psf
 PSFexp  = src.data.getPSFexp(config.psf_load_path)  # (C=4, 41, H=K, W=K)
-
-
-# %% decon with experimental PSF
-
 # deconvolution
 model = src.model.DeconPoisson(I.to(device), PSFexp.to(device))
 for _ in tqdm.tqdm(range(config.epoch_decon)): model()
 Oexp = model.O.detach().cpu()
-del model   # free memory
 # save
 os.makedirs(config.data_save_fold, exist_ok=True)
 tifffile.imwrite(
     os.path.join(config.data_save_fold, "Oexp.tif"),
-    Oexp.detach().cpu().numpy().astype(np.float32)[:, :, None, ...],
-    imagej=True,
-    metadata={"axes": "TZCYX"}  # tell ImageJ how to interpret dimensions
+    Oexp.numpy().astype(np.float32)[:, :, None, ...],
+    imagej=True, metadata={"axes": "TZCYX"}
 )
+# clean
+del model
+if device.type == 'cuda': torch.cuda.empty_cache()
+if device.type == 'mps': torch.mps.empty_cache()
 
+# %% # deconvolution with retrieved psf
+""" deconvolution with retrieved psf """
 
-# %% Recompute analytic PSF for retrieved phase
-
-PSF, PSFR, pupil_ampli_s, pupil_ampli_p, defocus = getPSFsim(
+# psf
+PSFsim, pupil_ampli_s, pupil_ampli_p, defocus = src.data.getPSFsim(
     **dataclasses.asdict(config)
 )
-
-# %%
-dzs = 1e-3 * torch.arange(
-    config.z_min, config.z_max + config.z_sep, config.z_sep
-).to(torch.float32)
-num_z = len(dzs)
-defocus_temp = defocus
-defocus = (
-    torch.tensor(defocus)
-    .to(torch.float32)[None, None]
-    .repeat(1, num_z, 1, 1)
+PSFret = src.data.getPSFret(
+    PSFsim, pupil_ampli_s, pupil_ampli_p, defocus,
+    **dataclasses.asdict(config)
 )
-# multiply defocus phase term (1, num_z, im_size, imsize) by dzs (num_z, )
-defocus = defocus * dzs[..., None, None]
-defocus = defocus.to(device)
-
-PSF = PSF.permute(2, 3, 0, 1)
-PSFR = PSFR.permute(2, 3, 0, 1) # this is PSF rotated by 180 degrees
-num_z = PSF.shape[1]
-
-
- # %% Deconvolution with retrieved phase PSF (second stage)
-abe = scipy.io.loadmat(
-    config.psf_load_path
-)['phase_init']
-pupil_ampli_s_temp = np.moveaxis(pupil_ampli_s, -1, 0)
-pupil_ampli_p_temp = np.moveaxis(pupil_ampli_p, -1, 0)
-# s-polarization
-pupil_ampli_s = np.moveaxis(pupil_ampli_s, -1, 0)
-pupil_ampli_s = (
-    torch.tensor(pupil_ampli_s)
-    .to(torch.float32)[:, None]
-    .repeat(1, num_z, 1, 1)
+# deconvolution
+model = src.model.DeconPoisson(I.to(device), PSFret.to(device))
+for _ in tqdm.tqdm(range(config.epoch_decon)): model()
+Oret = model.O.detach().cpu()
+# save
+os.makedirs(config.data_save_fold, exist_ok=True)
+tifffile.imwrite(
+    os.path.join(config.data_save_fold, "Oret.tif"),
+    Oret.numpy().astype(np.float32)[:, :, None, ...],
+    imagej=True, metadata={"axes": "TZCYX"}
 )
-pupil_ampli_s = pupil_ampli_s.to(device)
-# p-polarization
-pupil_ampli_p = np.moveaxis(pupil_ampli_p, -1, 0)
-pupil_ampli_p = (
-    torch.tensor(pupil_ampli_p)
-    .to(torch.float32)[:, None]
-    .repeat(1, num_z, 1, 1)
-)
-pupil_ampli_p = pupil_ampli_p.to(device)
+# clean
+del model
+if device.type == 'cuda': torch.cuda.empty_cache()
+if device.type == 'mps': torch.mps.empty_cache()
+
+
+# %% Neural representations: merge experimental and retrieved stacks
+#######################################################
+ # Neural representations
 
 # convert aberration to PSF
 def abe_to_psf(aberration, num_pol, pupil_ampli_s, pupil_ampli_p, defocus):
@@ -124,27 +107,7 @@ def abe_to_psf(aberration, num_pol, pupil_ampli_s, pupil_ampli_p, defocus):
     psf = psf_s + psf_p
     return psf
 
-#  to tensor
-abe = torch.tensor(abe).to(torch.float32).to(device) 
-PSF = abe_to_psf(
-    abe, config.C, pupil_ampli_s, pupil_ampli_p, defocus
-)
-PSF = PSF / PSF.sum() * config.C * len(dzs)
 
-model = src.model.DeconPoisson(I.to(device), PSF.to(device))
-for _ in tqdm.tqdm(range(config.epoch_decon)): model()
-Oret = model.O.detach().cpu()
-
-# show the deconvolved results
-plot_deconvolution(
-    num_z, Oret, config.data_save_fold, tag='Retrieved Phase Deconvolution'
-)
-g_retri = Oret.clone()
-
-
-# %% Neural representations: merge experimental and retrieved stacks
-#######################################################
- # Neural representations
 dzs_ret = torch.arange(
     config.z_min, config.z_max + config.z_sep, config.z_sep
 ).to(torch.float32)
@@ -159,6 +122,7 @@ idx_eIne = [
     for dz in dzs_ret if torch.min(torch.abs(dzs_exp - dz)) < 0.001
 ]
 
+g_retri = Oret.clone()
 g_retri[0,idx_eInr] = Oexp[0,idx_eIne]
 idx_eNotInr = [i for i in range(len(dzs_exp)) if i not in idx_eIne]
 
@@ -194,23 +158,13 @@ model_fn = torch.compile(model, backend="inductor")
 
 # %% Prepare pupil amplitudes and phase for neural optimization
 # Set Pupil amplitude
-pupil_ampli_s = (
-    torch.tensor(pupil_ampli_s_temp)
-    .to(torch.float32)[:, None]
-    .repeat(1, num_z, 1, 1)
-    .to(device)
-)
-pupil_ampli_p = (
-    torch.tensor(pupil_ampli_p_temp)
-    .to(torch.float32)[:, None]
-    .repeat(1, num_z, 1, 1)
-    .to(device)
-)
+pupil_ampli_s = pupil_ampli_s.repeat(1, num_z, 1, 1)
+pupil_ampli_p = pupil_ampli_p.repeat(1, num_z, 1, 1)
 
 abe = scipy.io.loadmat(
     config.psf_load_path
 )['phase_init']
-abe = torch.tensor(abe).to(torch.float32).to(device) 
+abe = torch.tensor(abe).to(torch.float32)
 
 # %% Optimization setup (optimizer, scheduler, loss)
 num_epochs = config.learn_psf_epochs + config.init_epochs
@@ -324,15 +278,10 @@ for epoch in tbar:
 
 
         # Set defocus phase term
-        defocus_ext = (
-            torch.tensor(defocus_temp)
-            .to(torch.float32)[None, None]
-            .repeat(1, len(dzs_ext), 1, 1)
-        )
+        defocus_ext = defocus.repeat(1, len(dzs_ext), 1, 1)
         # multiply defocus phase term 
         # (1, num_z, im_size, imsize) by dzs (num_z, )
         defocus_ext = defocus_ext * dzs_ext[..., None, None]
-        defocus_ext = defocus_ext.to(device)
         
         pupil_ampli_s = pupil_ampli_s[:, :len(dzs_ext)] 
         pupil_ampli_p = pupil_ampli_p[:, :len(dzs_ext)] 
