@@ -4,9 +4,10 @@ channels:
   - defaults
 dependencies:
   - pytorch=2.8
-  - numpy=2.3
-  - scipy=1.16
-  - scikit-image=0.25
-  - jupyter=1.1
-  - matplotlib=3.10
-  - tqdm=4.67
+  - numpy
+  - scipy
+  - scikit-image
+  - jupyter
+  - matplotlib
+  - tqdm
+  - osfclient

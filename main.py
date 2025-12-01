@@ -32,7 +32,7 @@ else: device = torch.device("cpu")
 """ setup """
 
 # config
-config = src.config.ConfigRoot()
+config = src.config.Config()
 # measurement
 I = src.data.getI(config.data_load_path, config.N)  # (C=4,  1, H=N, W=N)
 
@@ -44,12 +44,13 @@ I = src.data.getI(config.data_load_path, config.N)  # (C=4,  1, H=N, W=N)
 PSFexp  = src.data.getPSFexp(config.psf_load_path)  # (C=4, 41, H=K, W=K)
 # deconvolution
 model = src.model.DeconPoisson(I.to(device), PSFexp.to(device))
-for _ in tqdm.tqdm(range(config.epoch_decon)): model()
+for _ in tqdm.tqdm(range(config.epoch_decon), desc="deconvolution"): model()
 Oexp = model.O.detach().cpu()
 # save
 os.makedirs(config.data_save_fold, exist_ok=True)
+filename = config.data_load_path.split('/')[-1].split('.')[0]
 tifffile.imwrite(
-    os.path.join(config.data_save_fold, "Oexp.tif"),
+    os.path.join(config.data_save_fold, f"{filename}_Oexp.tif"),
     Oexp.numpy().astype(np.float32)[:, :, None, ...],
     imagej=True, metadata={"axes": "TZCYX"}
 )
@@ -71,12 +72,13 @@ PSFret = src.data.getPSFret(
 )
 # deconvolution
 model = src.model.DeconPoisson(I.to(device), PSFret.to(device))
-for _ in tqdm.tqdm(range(config.epoch_decon)): model()
+for _ in tqdm.tqdm(range(config.epoch_decon), desc="deconvolution"): model()
 Oret = model.O.detach().cpu()
 # save
 os.makedirs(config.data_save_fold, exist_ok=True)
+filename = config.data_load_path.split('/')[-1].split('.')[0]
 tifffile.imwrite(
-    os.path.join(config.data_save_fold, "Oret.tif"),
+    os.path.join(config.data_save_fold, f"{filename}_Oret.tif"),
     Oret.numpy().astype(np.float32)[:, :, None, ...],
     imagej=True, metadata={"axes": "TZCYX"}
 )

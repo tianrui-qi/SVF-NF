@@ -1,11 +1,33 @@
-Project Page: https://hwzhou2020.github.io/SVF-Web/
+## Environment
 
-## Data source
-Please download data and put them in the "data" folder
-Link: https://osf.io/4a5ws/
-'data' folder gives a few example data (all included in GitHub data folder).
-'data_all' includes all data for the root sample.
+This project is developed and tested with `pytorch=2.8`. We recommend using
+[conda](https://docs.conda.io/en/latest/)
+to ensure all dependencies are installed correctly.
+To set up project environment,
 
-##
-fluo_recon_lymphn.py: simulation main code with lymph node vascular.
-fluo_recon_root.py: experiments for plant root sample.
+```bash
+# clone the repository
+git clone git@github.com:tianrui-qi/SVF-NF.git
+cd SVF-NF
+# create the conda environment
+conda env create -f environment.yml
+conda activate svf-nf
+```
+
+## Data
+
+Example data is avaiable at [OSF](https://osf.io/4a5ws/).
+To download all data,
+
+```bash
+osf -p 4a5ws clone data/
+```
+
+Then, rearrange data folder structure as follows:
+
+```bash
+mkdir data/frame
+mv data/osfstorage/data_all/*.tif data/frame/
+mv data/osfstorage/data_all/ExpPSF_605.mat data/psf.mat
+rm -r data/osfstorage
+```
