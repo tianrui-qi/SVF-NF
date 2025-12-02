@@ -12,7 +12,6 @@ import tifffile
 import dataclasses
 
 import src
-import network
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
@@ -150,7 +149,7 @@ num_z = len(dzs)
 #     num_layers=2,
 #     layernorm=config.use_layernorm,
 # ).to(device)
-model = network.FullModel(
+model = src.model.FullModel(
     w = g.shape[-1], 
     h = g.shape[-1], 
     Q = config.Q, 
@@ -208,7 +207,9 @@ for epoch in tbar:
             os.path.join(
                 config.data_save_fold, f"{filename}_Onf_1_{epoch + 1}.tif"
             ),
-            g_est.detach().cpu().numpy().astype(np.float32)[:, :, None, ...],
+            (
+                torch.exp(g_est * (log_gmax - log_gmin) + log_gmin) - 1
+            ).detach().cpu().numpy().astype(np.float32)[:, :, None, ...],
             imagej=True, metadata={"axes": "TZCYX"}
         )
 
@@ -237,7 +238,9 @@ for epoch in tbar:
             os.path.join(
                 config.data_save_fold, f"{filename}_Onf_2_{epoch + 1}.tif"
             ),
-            g_est.detach().cpu().numpy().astype(np.float32)[:, :, None, ...],
+            (
+                torch.exp(g_est * (log_gmax - log_gmin) + log_gmin) - 1
+            ).detach().cpu().numpy().astype(np.float32)[:, :, None, ...],
             imagej=True, metadata={"axes": "TZCYX"}
         )
 

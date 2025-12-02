@@ -30,7 +30,7 @@ class Config():
     # run
     epoch_decon: int = 100      # num of iterations for RL deconvolution
     epoch_stage1: int = 100     # epochs for initialization
-    epoch_stage2: int = 100     # epochs for learn psf
+    epoch_stage2: int = 200     # epochs for learn psf
     display_freq: int = 10      # save result every n epochs
 
     # Learn PSF options
