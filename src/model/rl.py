@@ -1,7 +1,7 @@
 import torch
 
 
-class DeconPoisson(torch.nn.Module):
+class DeconRL(torch.nn.Module):
     def __init__(
         self, 
         I: torch.Tensor,    # (C, 1, H=N, W=N)

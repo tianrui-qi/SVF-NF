@@ -1,5 +1,7 @@
-from .decon import DeconPoisson
+from .rl import DeconRL
+from .nf import Render3D
 
 __all__ = [
-    'DeconPoisson'
+    'DeconRL',
+    'Render3D',
 ]
